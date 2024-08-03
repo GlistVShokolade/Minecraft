@@ -1,11 +1,9 @@
 ﻿using OpenTK.Graphics.OpenGL;
 using OpenTK.Mathematics;
-using OpenTK.Platform.Windows;
 using OpenTK.Windowing.Common;
 using OpenTK.Windowing.Desktop;
 using OpenTK.Windowing.GraphicsLibraryFramework;
-using System.Diagnostics;
-using System.Drawing;
+using StbImageSharp;
 
 public class Program
 {
@@ -14,7 +12,6 @@ public class Program
         var gameSettings = new GameWindowSettings();
         var nativeSettings = new NativeWindowSettings();
 
-        nativeSettings.Title = "Minecraft Like Game";
         nativeSettings.ClientSize = new Vector2i(1280, 720);
         nativeSettings.Vsync = VSyncMode.On;
         nativeSettings.Profile = ContextProfile.Compatability;
@@ -23,50 +20,62 @@ public class Program
         {
             window.Run();
         }
-
-        Console.WriteLine("Окно было создано");
     }
 }
 
 public class Window : GameWindow
 {
     private readonly Camera _camera;
+    private readonly BlockContainer _blockContainer;
 
     private readonly ChunkMeshBuilder _meshBuilder;
     private readonly ChunkTerrainGenerator _terrainGenerator;
-    private readonly ChunkSpawner _chunkSpawner;
 
     private readonly WorldUpdator _worldUpdator;
     private readonly WorldRenderer _worldRenderer;
 
-    private readonly PolygonParser _polygonParser;
     private readonly FPSCounter _fpsCounter;
 
+    private readonly Input _input;
+    private readonly Time _time;
+    
     private readonly World _world;
 
     public Window(GameWindowSettings gameWindowSettings, NativeWindowSettings nativeWindowSettings) : base(gameWindowSettings, nativeWindowSettings)
     {
+        CursorState = CursorState.Grabbed;
+
         var terrainSettings = new NoiseSettings(0.14f, 0.5f, 10f, FastNoiseLite.NoiseType.Perlin, FastNoiseLite.FractalType.None, FastNoiseLite.RotationType3D.None);
+        var caveSettings = new NoiseSettings(2f, 1f, 0.5f, FastNoiseLite.NoiseType.Perlin, FastNoiseLite.FractalType.DomainWarpProgressive, FastNoiseLite.RotationType3D.ImproveXZPlanes);
 
         _camera = new Camera(10f, 0.4f, Vector3.Zero, Vector3.One, Quaternion.Identity);
 
         _meshBuilder = new ChunkMeshBuilder();
-        _terrainGenerator = new ChunkTerrainGenerator(terrainSettings);
-        _chunkSpawner = new ChunkSpawner();
+        _terrainGenerator = new ChunkTerrainGenerator(terrainSettings, caveSettings);
         _worldUpdator = new WorldUpdator();
         _worldRenderer = new WorldRenderer();
-        _polygonParser = new PolygonParser();
         _fpsCounter = new FPSCounter(this);
-        _world = new World();
+        _input = new Input(KeyboardState, MouseState);
+        _time = new Time(this);
+
+        _world = new World(_camera);
+        _blockContainer = new BlockContainer();
     }
 
     protected override void OnLoad()
     {
         GL.Enable(EnableCap.CullFace);
         GL.Enable(EnableCap.DepthTest);
+        GL.Enable(EnableCap.Texture2D);
 
         GL.CullFace(CullFaceMode.Back);
 
+        var texture = TextureHandler.Load(@"Textures\Texture.png");
+
+        TextureHandler.Bind(texture);
+
+        _worldUpdator.OnInit();
+            
         base.OnLoad();
     }
 
@@ -74,6 +83,11 @@ public class Window : GameWindow
     {
         GL.Disable(EnableCap.CullFace);
         GL.Disable(EnableCap.DepthTest);
+        GL.Disable(EnableCap.Texture2D);
+
+        TextureHandler.Unbind();
+
+        _worldUpdator.OnEnd();
 
         base.OnUnload();
     }
@@ -103,6 +117,8 @@ public class Window : GameWindow
             return;
         }
 
+        _worldUpdator.OnUpdate();
+
         if (KeyboardState.WasKeyDown(Keys.P))
         {
             GL.PolygonMode(MaterialFace.Front, PolygonMode.Line);
@@ -112,12 +128,99 @@ public class Window : GameWindow
             GL.PolygonMode(MaterialFace.Front, PolygonMode.Fill);
         }
 
-        _camera.Move((float)args.Time, KeyboardState);
-        _camera.Rotate(MouseState);
+        _camera.Move();
+        _camera.Rotate();
 
-        _fpsCounter.Calculate(args.Time);
+        _fpsCounter.Calculate();
 
         base.OnUpdateFrame(args);
+    }
+}
+
+public class LightSource : IUpdatable
+{
+    private LightSettings _settings;
+
+    public LightSource(LightSettings settings)
+    {
+        _settings = settings;
+
+        WorldUpdator.Instance.RegisterUpdate(this);
+    }
+
+    ~LightSource()
+    {
+        WorldUpdator.Instance.UnregisterUpdate(this);
+    }
+
+    public void Light()
+    {
+        GL.Enable(EnableCap.Normalize);
+
+        GL.PushMatrix();
+
+        GL.Light(LightName.Light0, LightParameter.Position, _settings.Position);
+        GL.Light(LightName.Light0, LightParameter.SpotDirection, _settings.Direction);
+
+        GL.PopMatrix();
+
+        GL.Disable(EnableCap.Normalize);
+    }
+
+    public void Update()
+    {
+        Light();
+    }
+}
+
+public struct LightSettings
+{
+    public Vector4 Position;
+    public Vector4 Direction;
+    public EnableCap LightID;
+    public LightName LightName;
+
+    public LightSettings(Vector4 position, Vector4 direction, EnableCap lightID, LightName lightName)
+    {
+        Position = position;
+        Direction = direction;
+        LightID = lightID;
+        LightName = lightName;
+    }
+}
+
+public class Input
+{
+    public static Input Instance;
+
+    private readonly KeyboardState _keyboard;
+    private readonly MouseState _mouse;
+
+    public Vector2 MousePosition => _mouse.Position;
+
+    public Input(KeyboardState keyboard, MouseState mouse)
+    {
+        if (Instance == null)
+        {
+            Instance = this;
+        }
+
+        _keyboard = keyboard ?? throw new NullReferenceException(nameof(keyboard));
+        _mouse = mouse ?? throw new NullReferenceException(nameof(mouse));
+    }
+
+    public bool IsKeyPressed(Keys key)
+    {
+        return _keyboard.IsKeyPressed(key);
+    }
+
+    public bool IsKeyReleased(Keys key)
+    {
+        return _keyboard.IsKeyReleased(key);
+    }
+    public bool IsKeyDown(Keys key)
+    {
+        return _keyboard.IsKeyDown(key);
     }
 }
 
@@ -126,7 +229,7 @@ public class FPSCounter
     private readonly GameWindow _window;
 
     private int _currentFPS;
-    private double _frameTime;
+    private float _frameTime;
 
     public FPSCounter(GameWindow window)
     {
@@ -145,23 +248,23 @@ public class FPSCounter
         return false;
     }
 
-    public void Calculate(double frameTime)
+    public void Calculate()
     {
         if (_frameTime < 1d)
         {   
-            _frameTime += frameTime;
+            _frameTime += Time.Instance.UpdateTime;
             _currentFPS++;
         }
         else
         {
-            _frameTime = 0d;
+            _frameTime = 0f;
             _currentFPS = 0;
         }
     }
 
     private void Draw()
     {
-        _window.Title = $"Minecraft Like Game | FPS: {_currentFPS}";
+        _window.Title = $"Minecraft Like Game | FPS: { _currentFPS}";
     }
 }
 
@@ -240,13 +343,60 @@ public class WorldUpdator
         }
     }
 
-    public void Register(IInitable initable) => _initables.Add(initable);
-    public void Register(IUpdatable updatable) => _updatables.Add(updatable);
-    public void Register(IEndable endable) => _endables.Add(endable);
+    public void OnInit()
+    {
+        for (int i = 0; i < _initables.Count; i++)
+        {
+            _initables[i].Init();
+        }
 
-    public void Unregister(IInitable initable) => _initables.Remove(initable);
-    public void Unegister(IUpdatable updatable) => _updatables.Remove(updatable);
-    public void Unregister(IEndable endable) => _endables.Remove(endable);
+        _initables.Clear();
+    }
+
+    public void OnEnd()
+    {
+        for (int i = 0; i < _endables.Count; i++)
+        {
+            _endables[i].End();
+        }
+
+        _endables.Clear();
+    }
+
+    public void OnUpdate()
+    {
+        for (int i = 0; i < _updatables.Count; i++)
+        {
+            _updatables[i].Update();
+        }
+    }
+
+    public void RegisterInit(IInitable initable) => _initables.Add(initable);
+    public void RegisterUpdate(IUpdatable updatable) => _updatables.Add(updatable);
+    public void RegisterEnd(IEndable endable) => _endables.Add(endable);
+
+    public void UnregisterInit(IInitable initable) => _initables.Remove(initable);
+    public void UnregisterUpdate(IUpdatable updatable) => _updatables.Remove(updatable);
+    public void UnregisterEnd(IEndable endable) => _endables.Remove(endable);
+}
+
+public class Time
+{
+    public static Time Instance;
+
+    private readonly GameWindow _window;
+
+    public float UpdateTime => (float)_window.UpdateTime;
+
+    public Time(GameWindow window)
+    {
+        if (Instance == null)
+        {
+            Instance = this;
+        }
+
+        _window = window ?? throw new NullReferenceException(nameof(window));
+    }
 }
 
 public interface IInitable
@@ -271,15 +421,13 @@ public class Constants
 
 public class World
 {
-    public World()
+    private readonly ChunkSpawner _spawner;
+    private readonly ChunkLoader _loader;
+
+    public World(Transform player)
     {
-        for (int x = 0; x < 10; x++)
-        {
-            for (int y = 0; y < 10; y++)
-            {
-                ChunkSpawner.Instance.Spawn(new Vector3i(x, 0, y) * Chunk.Width);
-            }
-        }
+        _loader = new ChunkLoader(player);
+        _spawner = new ChunkSpawner(_loader);
     }
 }
 
@@ -314,7 +462,7 @@ public class MeshRenderer : Renderer
 
     public MeshRenderer(Mesh mesh)
     {
-        Mesh = mesh ?? throw new NullReferenceException(nameof(mesh));
+        Mesh = mesh;
     }
 
     public override void Render()
@@ -324,37 +472,200 @@ public class MeshRenderer : Renderer
     }
 }
 
+public class ChunkLoader : IUpdatable
+{
+    private readonly Transform _player;
+
+    private Vector2i _lastChunkPosition = Vector2i.UnitY;
+    private Vector2i PlayerChunkPosition => new Vector2i((int)_player.Position.X, (int)_player.Position.Z) / Chunk.Width;
+
+    private readonly Dictionary<Vector2i, LoadedChunkData> _loadedChunks = new Dictionary<Vector2i, LoadedChunkData>();
+
+    public event Action<LoadedChunkData[]> ChunksLoaded;
+
+    public ChunkLoader(Transform player)
+    {
+        _player = player ?? throw new NullReferenceException(nameof(player));
+
+        WorldUpdator.Instance.RegisterUpdate(this);
+    }
+
+    ~ChunkLoader()
+    {
+        WorldUpdator.Instance.UnregisterUpdate(this);
+    }
+
+
+    public void LoadChunks()
+    {
+        var currentChunkPosition = PlayerChunkPosition;
+
+        for (int x = currentChunkPosition.X - Camera.ViewRadius; x < currentChunkPosition.X + Camera.ViewRadius; x++)
+        {
+            for (int y = currentChunkPosition.Y - Camera.ViewRadius; y < currentChunkPosition.Y + Camera.ViewRadius; y++)
+            {
+                var localPosition = new Vector2i(x, y); 
+
+                if (_loadedChunks.ContainsKey(localPosition))
+                {
+                    continue;
+                }
+
+                var distance = Vector2.Distance(currentChunkPosition, localPosition);
+                
+                if (distance > Camera.ViewRadius)
+                {
+                    continue;
+                }
+
+                var worldPosition = new Vector3i(x, 0, y) * Chunk.Width;
+
+               LoadChunk(worldPosition, localPosition);
+            }
+        }
+
+        ChunksLoaded?.Invoke(_loadedChunks.Values.ToArray());
+    }
+
+    private void LoadChunk(Vector3i worldPosition, Vector2i localPosition)
+    {
+        var loadedChunkData = new LoadedChunkData();
+
+        var blocks = ChunkTerrainGenerator.Instance.Generate(worldPosition);
+        var mesh = ChunkMeshBuilder.Instance.Generate(blocks, worldPosition);
+
+        loadedChunkData.Mesh = mesh;
+        loadedChunkData.WorldPosition = worldPosition;
+
+        _loadedChunks.Add(localPosition, loadedChunkData);
+    }
+
+    public void Update()
+    {
+        TryLoad();
+    }
+
+    private bool TryLoad()
+    {
+        var currentChunkPosition = PlayerChunkPosition;
+
+        if (_lastChunkPosition != currentChunkPosition)
+        {
+            _lastChunkPosition = currentChunkPosition;
+
+            LoadChunks();
+
+            return true;
+        }
+
+        return false;
+    }
+}
+
+public static class TextureHandler
+{
+    public static Texture Load(string path)
+    {
+        StbImage.stbi_set_flip_vertically_on_load(1);
+        var image = ImageResult.FromStream(File.OpenRead(path), ColorComponents.RedGreenBlue);
+
+        var id = GL.GenTexture();
+
+        GL.BindTexture(TextureTarget.Texture2D, id);
+
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.Clamp);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.Clamp);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.NearestMipmapNearest);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMaxLevel, 4);
+
+        GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgb, image.Width, image.Height, 0, PixelFormat.Rgb, PixelType.UnsignedByte, image.Data);
+        GL.GenerateMipmap(GenerateMipmapTarget.Texture2D);
+
+        GL.BindTexture(TextureTarget.Texture2D, 0);
+
+        return new Texture(id);
+    }
+
+    public static void Bind(Texture texture)
+    {
+        GL.BindTexture(TextureTarget.Texture2D, texture.ID);
+    }
+
+    public static void Unbind()
+    {
+        GL.BindTexture(TextureTarget.Texture2D, 0);
+    }
+}
+
+public struct Texture
+{
+    public int ID { get; }
+
+    public Texture(int textureId)
+    {
+        if (textureId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(textureId));
+        }
+
+        ID = textureId;
+    }
+}
+
 public class ChunkSpawner
 {
-    public static ChunkSpawner Instance;
-
-    public ChunkSpawner()
+    private readonly ChunkLoader _chunkLoader;
+    
+    public ChunkSpawner(ChunkLoader chunkLoader)
     {
-        if (Instance == null)
+        _chunkLoader = chunkLoader ?? throw new NullReferenceException(nameof(chunkLoader));
+
+        _chunkLoader.ChunksLoaded += SpawnChunks;
+    }
+
+    ~ChunkSpawner()
+    {
+        _chunkLoader.ChunksLoaded -= SpawnChunks;
+    }
+
+    private void SpawnChunks(LoadedChunkData[] loadedChunkDatas)
+    {
+        for (int i = 0; i < loadedChunkDatas.Length; i++)
         {
-            Instance = this;
+            SpawnChunk(loadedChunkDatas[i]);
         }
     }
 
-    public Chunk Spawn(Vector3i worldPosition)
+    private void SpawnChunk(LoadedChunkData loadedChunkData)
     {
-        var stopwatch = new Stopwatch();
-
-        stopwatch.Start();
-
-        var voxels = ChunkTerrainGenerator.Instance.Generate(worldPosition);
-        var mesh = ChunkMeshBuilder.Instance.Generate(voxels, worldPosition);
-
-        var transform = new Transform(worldPosition, Vector3.One, Quaternion.Identity);
-        var renderer = new MeshRenderer(mesh);
+        var transform = new Transform(loadedChunkData.WorldPosition, Vector3.One, Quaternion.Identity);
+        var renderer = new MeshRenderer(loadedChunkData.Mesh);
 
         var chunk = new Chunk(transform, renderer);
+    }
+}
 
-        stopwatch.Stop();
+public enum ChunkLoadState : byte
+{
+    Start,
+    Loaded,
+    Complete,
+}
 
-        Console.WriteLine($"Time on generate chunk: {stopwatch.ElapsedMilliseconds}");
+public class BlockContainer
+{
+    private static Dictionary<BlockType, Block> _blocks = new Dictionary<BlockType, Block>();
+    
+    public BlockContainer()
+    {
+        _blocks.Add(BlockType.Grass, new Grass());
+        _blocks.Add(BlockType.Stone, new Stone());
+    }
 
-        return chunk;
+    public static Block Get(BlockType type)
+    {
+        return _blocks[type];
     }
 }
 
@@ -377,12 +688,10 @@ public class ChunkMeshBuilder
 
     public Mesh Generate(BlockType[,,] blocks, Vector3i chunkPosition)
     {
-        _polygons = new List<Polygon>(blocks.Length * 12);
+        _polygons = new List<Polygon>();
 
         _blocks = blocks;
         _chunkPosition = chunkPosition;
-
-        Console.WriteLine(blocks.Length);
 
         for (int x = 0; x < Chunk.Width; x++)
         {
@@ -395,7 +704,12 @@ public class ChunkMeshBuilder
             }
         }
 
-        return new Mesh(_polygons.ToArray());
+        var polygons = _polygons.ToArray();
+
+        _blocks = null;
+        _polygons = null;
+
+        return new Mesh(polygons);
     }
 
     private void GenerateBlock(int x, int y, int z)
@@ -405,31 +719,32 @@ public class ChunkMeshBuilder
             return;
         }
 
+        var block = BlockContainer.Get(_blocks[x, y, z]);
         var blockPosition = new Vector3i(x, y, z);
 
         if (GetBlock(blockPosition + Vector3i.UnitZ) == BlockType.Air)
         {
-            GenerateBackFace(blockPosition + _chunkPosition);
+            GenerateBackFace(block, blockPosition);
         }
         if (GetBlock(blockPosition - Vector3i.UnitZ) == BlockType.Air)
         {
-            GenerateFrontFace(blockPosition + _chunkPosition);
+            GenerateFrontFace(block, blockPosition);
         }
         if (GetBlock(blockPosition - Vector3i.UnitX) == BlockType.Air)
         {
-            GenerateRightFace(blockPosition + _chunkPosition);
+            GenerateRightFace(block, blockPosition);
         }
         if (GetBlock(blockPosition + Vector3i.UnitX) == BlockType.Air)
         {
-            GenerateLeftFace(blockPosition + _chunkPosition);
+            GenerateLeftFace(block, blockPosition);
         }
         if (GetBlock(blockPosition + Vector3i.UnitY) == BlockType.Air)
         {
-            GenerateTopFace(blockPosition + _chunkPosition);
+            GenerateTopFace(block, blockPosition);
         }
         if (blockPosition.Y > 0 && GetBlock(blockPosition - Vector3i.UnitY) == BlockType.Air)
         {
-            GenerateBottomFace(blockPosition + _chunkPosition);
+            GenerateBottomFace(block, blockPosition);
         }
     }
 
@@ -445,106 +760,172 @@ public class ChunkMeshBuilder
         return BlockType.Grass;
     }
 
-    private void GenerateFrontFace(Vector3i blockPosition)
+    private void GenerateFrontFace(Block block, Vector3i blockPosition)
     {
         var vertcies1 = new Vector3[3];
         var vertcies2 = new Vector3[3];
 
-        vertcies1[0] = new Vector3(0f, 0f, 0f) + blockPosition;
-        vertcies1[2] = new Vector3(1f, 0f, 0f) + blockPosition;
-        vertcies1[1] = new Vector3(0f, 1f, 0f) + blockPosition;
+        var texCoords1 = new Vector2[3];
+        var texCoords2 = new Vector2[3];
 
-        vertcies2[0] = new Vector3(1f, 0f, 0f) + blockPosition;
-        vertcies2[2] = new Vector3(1f, 1f, 0f) + blockPosition;
-        vertcies2[1] = new Vector3(0f, 1f, 0f) + blockPosition;
+        texCoords1[0] = block.TexCoords[0];
+        texCoords1[1] = block.TexCoords[1];
+        texCoords1[2] = block.TexCoords[2];
 
-        GenerateFace(vertcies1, vertcies2);
+        texCoords2[0] = block.TexCoords[3];
+        texCoords2[1] = block.TexCoords[4];
+        texCoords2[2] = block.TexCoords[5];
+
+        vertcies1[0] = block.Vertices[0] + blockPosition + _chunkPosition;
+        vertcies1[1] = block.Vertices[1] + blockPosition + _chunkPosition;
+        vertcies1[2] = block.Vertices[2] + blockPosition + _chunkPosition;
+
+        vertcies2[0] = block.Vertices[3] + blockPosition + _chunkPosition;
+        vertcies2[1] = block.Vertices[4] + blockPosition + _chunkPosition;
+        vertcies2[2] = block.Vertices[5] + blockPosition + _chunkPosition;
+
+        GenerateFace(vertcies1, vertcies2, texCoords1, texCoords2);
     }
 
-    private void GenerateBackFace(Vector3i blockPosition)
+    private void GenerateBackFace(Block block, Vector3i blockPosition)
     {
         var vertcies1 = new Vector3[3];
         var vertcies2 = new Vector3[3];
 
-        vertcies1[0] = new Vector3(0f, 0f, 1f) + blockPosition;
-        vertcies1[1] = new Vector3(1f, 0f, 1f) + blockPosition;
-        vertcies1[2] = new Vector3(0f, 1f, 1f) + blockPosition;
+        var texCoords1 = new Vector2[3];
+        var texCoords2 = new Vector2[3];
 
-        vertcies2[0] = new Vector3(1f, 0f, 1f) + blockPosition;
-        vertcies2[1] = new Vector3(1f, 1f, 1f) + blockPosition;
-        vertcies2[2] = new Vector3(0f, 1f, 1f) + blockPosition;
+        texCoords1[0] = block.TexCoords[6];
+        texCoords1[1] = block.TexCoords[7];
+        texCoords1[2] = block.TexCoords[8];
 
-        GenerateFace(vertcies1, vertcies2);
+        texCoords2[0] = block.TexCoords[9];
+        texCoords2[1] = block.TexCoords[10];
+        texCoords2[2] = block.TexCoords[11];
+
+        vertcies1[0] = block.Vertices[6] + blockPosition + _chunkPosition;
+        vertcies1[1] = block.Vertices[7] + blockPosition + _chunkPosition;
+        vertcies1[2] = block.Vertices[8] + blockPosition + _chunkPosition;
+
+        vertcies2[0] = block.Vertices[9] + blockPosition + _chunkPosition;
+        vertcies2[1] = block.Vertices[10] + blockPosition + _chunkPosition;
+        vertcies2[2] = block.Vertices[11] + blockPosition + _chunkPosition;
+
+        GenerateFace(vertcies1, vertcies2, texCoords1, texCoords2);
     }
 
-    private void GenerateTopFace(Vector3i blockPosition)
+    private void GenerateTopFace(Block block, Vector3i blockPosition)
     {
         var vertcies1 = new Vector3[3];
         var vertcies2 = new Vector3[3];
 
-        vertcies1[0] = new Vector3(0f, 1f, 0f) + blockPosition;
-        vertcies1[1] = new Vector3(0f, 1f, 1f) + blockPosition;
-        vertcies1[2] = new Vector3(1f, 1f, 0f) + blockPosition;
+        var texCoords1 = new Vector2[3];
+        var texCoords2 = new Vector2[3];
 
-        vertcies2[0] = new Vector3(0f, 1f, 1f) + blockPosition;
-        vertcies2[1] = new Vector3(1f, 1f, 1f) + blockPosition;
-        vertcies2[2] = new Vector3(1f, 1f, 0f) + blockPosition;
+        texCoords1[0] = block.TexCoords[12];
+        texCoords1[1] = block.TexCoords[13];
+        texCoords1[2] = block.TexCoords[14];
 
-        GenerateFace(vertcies1, vertcies2);
+        texCoords2[0] = block.TexCoords[15];
+        texCoords2[1] = block.TexCoords[16];
+        texCoords2[2] = block.TexCoords[17];
+
+        vertcies1[0] = block.Vertices[12] + blockPosition + _chunkPosition;
+        vertcies1[1] = block.Vertices[13] + blockPosition + _chunkPosition;
+        vertcies1[2] = block.Vertices[14] + blockPosition + _chunkPosition;
+
+        vertcies2[0] = block.Vertices[15] + blockPosition + _chunkPosition;
+        vertcies2[1] = block.Vertices[16] + blockPosition + _chunkPosition;
+        vertcies2[2] = block.Vertices[17] + blockPosition + _chunkPosition;
+
+        GenerateFace(vertcies1, vertcies2, texCoords1, texCoords2);
     }
 
-    private void GenerateBottomFace(Vector3i blockPosition)
+    private void GenerateBottomFace(Block block, Vector3i blockPosition)
     {
         var vertcies1 = new Vector3[3];
         var vertcies2 = new Vector3[3];
 
-        vertcies1[0] = new Vector3(0f, 0f, 0f) + blockPosition;
-        vertcies1[2] = new Vector3(0f, 0f, 1f) + blockPosition;
-        vertcies1[1] = new Vector3(1f, 0f, 0f) + blockPosition;
+        var texCoords1 = new Vector2[3];
+        var texCoords2 = new Vector2[3];
 
-        vertcies2[0] = new Vector3(0f, 0f, 1f) + blockPosition;
-        vertcies2[2] = new Vector3(1f, 0f, 1f) + blockPosition;
-        vertcies2[1] = new Vector3(1f, 0f, 0f) + blockPosition;
+        texCoords1[0] = block.TexCoords[18];
+        texCoords1[1] = block.TexCoords[19];
+        texCoords1[2] = block.TexCoords[20];
 
-        GenerateFace(vertcies1, vertcies2);
+        texCoords2[0] = block.TexCoords[21];
+        texCoords2[1] = block.TexCoords[22];
+        texCoords2[2] = block.TexCoords[23];
+
+        vertcies1[0] = block.Vertices[18] + blockPosition + _chunkPosition;
+        vertcies1[1] = block.Vertices[19] + blockPosition + _chunkPosition;
+        vertcies1[2] = block.Vertices[20] + blockPosition + _chunkPosition;
+
+        vertcies2[0] = block.Vertices[21] + blockPosition + _chunkPosition;
+        vertcies2[1] = block.Vertices[22] + blockPosition + _chunkPosition;
+        vertcies2[2] = block.Vertices[23] + blockPosition + _chunkPosition;
+
+        GenerateFace(vertcies1, vertcies2, texCoords1, texCoords2);
     }
 
-    private void GenerateRightFace(Vector3i blockPosition)
+    private void GenerateRightFace(Block block, Vector3i blockPosition)
     {
         var vertcies1 = new Vector3[3];
         var vertcies2 = new Vector3[3];
 
-        vertcies1[0] = new Vector3(0f, 0f, 1f) + blockPosition;
-        vertcies1[2] = new Vector3(0f, 0f, 0f) + blockPosition;
-        vertcies1[1] = new Vector3(0f, 1f, 1f) + blockPosition;
+        var texCoords1 = new Vector2[3];
+        var texCoords2 = new Vector2[3];
 
-        vertcies2[0] = new Vector3(0f, 1f, 1f) + blockPosition;
-        vertcies2[2] = new Vector3(0f, 0f, 0f) + blockPosition;
-        vertcies2[1] = new Vector3(0f, 1f, 0f) + blockPosition;
+        texCoords1[0] = block.TexCoords[24];
+        texCoords1[1] = block.TexCoords[25];
+        texCoords1[2] = block.TexCoords[26];
 
-        GenerateFace(vertcies1, vertcies2);
+        texCoords2[0] = block.TexCoords[27];
+        texCoords2[1] = block.TexCoords[28];
+        texCoords2[2] = block.TexCoords[29];
+
+        vertcies1[0] = block.Vertices[24] + blockPosition + _chunkPosition;
+        vertcies1[1] = block.Vertices[25] + blockPosition + _chunkPosition;
+        vertcies1[2] = block.Vertices[26] + blockPosition + _chunkPosition;
+
+        vertcies2[0] = block.Vertices[27] + blockPosition + _chunkPosition;
+        vertcies2[1] = block.Vertices[28] + blockPosition + _chunkPosition;
+        vertcies2[2] = block.Vertices[29] + blockPosition + _chunkPosition;
+
+        GenerateFace(vertcies1, vertcies2, texCoords1, texCoords2);
     }
 
-    private void GenerateLeftFace(Vector3i blockPosition)
+    private void GenerateLeftFace(Block block, Vector3i blockPosition)
     {
         var vertcies1 = new Vector3[3];
         var vertcies2 = new Vector3[3];
 
-        vertcies1[0] = new Vector3(1f, 0f, 1f) + blockPosition;
-        vertcies1[1] = new Vector3(1f, 0f, 0f) + blockPosition;
-        vertcies1[2] = new Vector3(1f, 1f, 1f) + blockPosition;
+        var texCoords1 = new Vector2[3];
+        var texCoords2 = new Vector2[3];
 
-        vertcies2[0] = new Vector3(1f, 1f, 1f) + blockPosition;
-        vertcies2[1] = new Vector3(1f, 0f, 0f) + blockPosition;
-        vertcies2[2] = new Vector3(1f, 1f, 0f) + blockPosition;
+        texCoords1[0] = block.TexCoords[30];
+        texCoords1[1] = block.TexCoords[31];
+        texCoords1[2] = block.TexCoords[32];
 
-        GenerateFace(vertcies1, vertcies2);
+        texCoords2[0] = block.TexCoords[33];
+        texCoords2[1] = block.TexCoords[34];
+        texCoords2[2] = block.TexCoords[35];
+
+        vertcies1[0] = block.Vertices[30] + blockPosition + _chunkPosition;
+        vertcies1[1] = block.Vertices[31] + blockPosition + _chunkPosition;
+        vertcies1[2] = block.Vertices[32] + blockPosition + _chunkPosition;
+
+        vertcies2[0] = block.Vertices[33] + blockPosition + _chunkPosition;
+        vertcies2[1] = block.Vertices[34] + blockPosition + _chunkPosition;
+        vertcies2[2] = block.Vertices[35] + blockPosition + _chunkPosition;
+
+        GenerateFace(vertcies1, vertcies2, texCoords1, texCoords2);
     }
 
-    private void GenerateFace(Vector3[] vertices1, Vector3[] vertices2)
-    {
-        var polygon1 = new Polygon(vertices1, Color4.DarkGreen);
-        var polygon2 = new Polygon(vertices2, Color4.DarkGreen);
+    private void GenerateFace(Vector3[] vertices1, Vector3[] vertices2, Vector2[] texCoords1, Vector2[] texCoords2)
+    { 
+        var polygon1 = new Polygon(vertices1, texCoords1);
+        var polygon2 = new Polygon(vertices2, texCoords2);
 
         _polygons.Add(polygon1);
         _polygons.Add(polygon2);
@@ -575,25 +956,34 @@ public class ChunkTerrainGenerator
 {
     public static ChunkTerrainGenerator Instance;
 
-    private FastNoiseLite _noise;
+    private FastNoiseLite _terrainNoise;
+    private FastNoiseLite _caveNoise;
 
-    private readonly NoiseSettings _settings;
+    private readonly NoiseSettings _terrainSettings;
+    private readonly NoiseSettings _caveSettings;
 
-    public ChunkTerrainGenerator(NoiseSettings settings)
+    public ChunkTerrainGenerator(NoiseSettings terrainSettings, NoiseSettings caveSettings)
     {
         if (Instance == null)
         {
             Instance = this;
         }
 
-        _noise = new FastNoiseLite();
+        SetNoise(terrainSettings, ref _terrainNoise);
+        SetNoise(caveSettings, ref _caveNoise);
 
-        _noise.SetNoiseType(settings.NoiseType);
-        _noise.SetFrequency(settings.Frequency);
-        _noise.SetFractalType(settings.FractalType);
-        _noise.SetRotationType3D(settings.RotationType);
+        _terrainSettings = terrainSettings;
+        _caveSettings = terrainSettings;
+    }
 
-        _settings = settings;
+    private void SetNoise(NoiseSettings settings, ref FastNoiseLite noise)
+    {
+        noise = new FastNoiseLite();
+
+        noise.SetNoiseType(settings.NoiseType);
+        noise.SetFrequency(settings.Frequency);
+        noise.SetFractalType(settings.FractalType);
+        noise.SetRotationType3D(settings.RotationType);
     }
 
     public BlockType[,,] Generate(Vector3i chunkPosition)
@@ -604,13 +994,30 @@ public class ChunkTerrainGenerator
         {
             for (int z = 0; z < Chunk.Width; z++)
             {
-                float height = _noise.GetNoise(
-                    (x + chunkPosition.X) * _settings.Amplitude,
-                    (z + chunkPosition.Z) * _settings.Amplitude) * _settings.Depth + 32;
+                float terrainHeight = _terrainNoise.GetNoise(
+                    (x + chunkPosition.X) * _terrainSettings.Amplitude,
+                    (z + chunkPosition.Z) * _terrainSettings.Amplitude) * _terrainSettings.Depth + 32;
 
-                for (int y = 0; y < height; y++)
+                for (int y = 0; y < terrainHeight; y++)
                 {
-                    blocks[x, y, z] = BlockType.Grass;
+                    if (y == (int)terrainHeight)
+                    {
+                        blocks[x, y, z] = BlockType.Grass;
+                    }
+                    else if ((int)terrainHeight - y < (int)terrainHeight)
+                    {
+                        blocks[x, y, z] = BlockType.Stone;
+                    }
+                }
+
+                for (int y = 0; y < Chunk.Height; y++)
+                {
+                    float caveWeight = _caveNoise.GetNoise((x + chunkPosition.X) * _caveSettings.Amplitude, y * _caveSettings.Amplitude, (z + chunkPosition.Z) * _caveSettings.Amplitude) * _caveSettings.Depth;
+
+                    if (caveWeight >= 1.5f)
+                    {
+                        blocks[x, y, z] = BlockType.Air;
+                    }
                 }
             }
         }
@@ -619,30 +1026,30 @@ public class ChunkTerrainGenerator
     }
 }
 
-public abstract class Factory<Config, GameObject>
+public struct Mesh
 {
-    public abstract GameObject Create(Config config);
-    public abstract void Delete(GameObject gameObject);
-}
+    public int VAO { get; private set; }
 
-public class Mesh
-{
-    public Polygon[] Polygons { get; }
-    public int VAO { get; }
+    private int _vboVertices;
+    private int _vboTexCoords;
+    private int _vboNormals;
 
-    private readonly int _vboVertices;
-    private readonly int _vboColors;
-
-    public int PolygonCount => Polygons.Length * 3;
+    public int PolygonCount { get; private set; }
 
     public Mesh(Polygon[] polygons)
     {
-        Polygons = polygons;
+        SetPolygons(polygons);
+    }
 
-        var data = PolygonParser.Instance.Parse(polygons);
+    public void SetPolygons(Polygon[] polygons)
+    {
+        PolygonCount = polygons.Length * 3;
 
+        var data = PolygonParser.Parse(polygons);
+
+        _vboNormals = CreateVBO(data.Normals, sizeof(float));
         _vboVertices = CreateVBO(data.Vertices, sizeof(float));
-        _vboColors = CreateVBO(data.Colors, sizeof(float));
+        _vboTexCoords = CreateVBO(data.TexCoords, sizeof(float));
 
         VAO = CreateVAO();
     }
@@ -665,85 +1072,112 @@ public class Mesh
         GL.BindVertexArray(vao);
 
         GL.EnableClientState(ArrayCap.VertexArray);
-        GL.EnableClientState(ArrayCap.ColorArray);
+        GL.EnableClientState(ArrayCap.TextureCoordArray);
+        GL.EnableClientState(ArrayCap.NormalArray);
+
+        GL.BindBuffer(BufferTarget.ArrayBuffer, _vboNormals);
+        GL.NormalPointer(NormalPointerType.Float, 0, 0);
 
         GL.BindBuffer(BufferTarget.ArrayBuffer, _vboVertices);
         GL.VertexPointer(3, VertexPointerType.Float, 0, 0);
 
-        GL.BindBuffer(BufferTarget.ArrayBuffer, _vboColors);
-        GL.ColorPointer(4, ColorPointerType.Float, 0, 0);
+        GL.BindBuffer(BufferTarget.ArrayBuffer, _vboTexCoords);
+        GL.TexCoordPointer(2, TexCoordPointerType.Float, 0, 0);
 
         GL.BindVertexArray(0);
         GL.BindBuffer(BufferTarget.ArrayBuffer, 0);
 
         GL.DisableClientState(ArrayCap.VertexArray);
-        GL.DisableClientState(ArrayCap.ColorArray);
+        GL.DisableClientState(ArrayCap.TextureCoordArray);
+        GL.DisableClientState(ArrayCap.NormalArray);
 
         return vao;
     }
 }
 
-public struct ParsedPolygonsData
+public static class Timer
 {
-    public float[] Vertices { get; }
-    public float[] Colors { get; }
-
-    public ParsedPolygonsData(float[] vertices, float[] colors)
+    public static void Wait(float time)
     {
-        Vertices = vertices;
-        Colors = colors;
+        while (time > 0f)
+        {
+            time -= Time.Instance.UpdateTime;
+        }
     }
 }
 
-public class PolygonParser
+public struct ParsedPolygonsData
 {
-    public static PolygonParser Instance;
+    public readonly float[] Vertices;
+    public readonly float[] TexCoords;
+    public readonly float[] Normals;
 
-    public PolygonParser()
+    public ParsedPolygonsData(float[] vertices, float[] texCoords, float[] normals)
     {
-        if (Instance == null)
-        {
-            Instance = this;
-        }
+        Vertices = vertices;
+        TexCoords = texCoords;
+        Normals = normals;
     }
+}
 
-    public ParsedPolygonsData Parse(Polygon[] polygons)
+public static class PolygonParser
+{
+    public static ParsedPolygonsData Parse(Polygon[] polygons)
     {
         var vertices = new List<float>();
-        var colors = new List<float>();
+        var texcoords = new List<float>();
+        var normals = new List<float>();
 
         for (int i = 0; i < polygons.Length; i++)
         {
-            for (int j = 0; j < polygons[i].Vertices.Length; j++)
+            for (int j = 0; j < 3; j++)
             {
                 vertices.Add(polygons[i].Vertices[j].X);
                 vertices.Add(polygons[i].Vertices[j].Y);
                 vertices.Add(polygons[i].Vertices[j].Z);
 
-                colors.Add(polygons[i].Color.R);
-                colors.Add(polygons[i].Color.G);
-                colors.Add(polygons[i].Color.B);
-                colors.Add(polygons[i].Color.A);
+                texcoords.Add(polygons[i].TexCoords[j].X);
+                texcoords.Add(polygons[i].TexCoords[j].Y);
             }
+
+            normals.Add(polygons[i].Normal.X);
+            normals.Add(polygons[i].Normal.Y);
+            normals.Add(polygons[i].Normal.Z);
         }
 
-        return new ParsedPolygonsData(vertices.ToArray(), colors.ToArray());
+        return new ParsedPolygonsData(vertices.ToArray(), texcoords.ToArray(), normals.ToArray());
+    }
+}
+
+public static class NormalCalculator
+{
+    public readonly static Vector3 LightDirection = new Vector3(0f, 0.5f, 1f);
+
+    public static Vector3 Calculate(Vector3 a, Vector3 b, Vector3 c)
+    {
+        return (c - a) * (b - a);
     }
 }
 
 public struct Polygon
 {
     public Vector3[] Vertices { get; }
-    public Color4 Color { get; }
+    public Vector2[] TexCoords { get; } 
+    public Vector3 Normal { get; }
 
-    public Polygon(Vector3[] vertices, Color4 color)
+    public Polygon(Vector3[] vertices, Vector2[] texCoords)
     {
         if (vertices.Length != 3)
         {
-            throw new ArgumentOutOfRangeException(nameof(vertices));
+            throw new ArgumentOutOfRangeException(nameof(vertices.Length));
+        }
+        if (texCoords.Length != 3)
+        {
+            throw new ArgumentOutOfRangeException(nameof(texCoords.Length));
         }
 
+        Normal = NormalCalculator.Calculate(vertices[0], vertices[1], vertices[2]);
         Vertices = vertices;
-        Color = color;
+        TexCoords = texCoords;
     }
 }

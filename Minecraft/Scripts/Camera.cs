@@ -53,58 +53,62 @@ public class Camera : Transform
         GL.LoadMatrix(ref view);
     }
 
-    public void Move(float frameTime, KeyboardState keyboard)
+    public void Move()
     {
-        if (keyboard.IsAnyKeyDown == false)
-        {
-            return;
-        }
+        var input = Input.Instance;
 
         Vector3 direction = Vector3.Zero;
 
-        if (keyboard.IsKeyDown(Keys.W))
+        if (input.IsKeyDown(Keys.W))
         {
-            direction += _front; //Forward 
+            direction += _front;
         }
-        if (keyboard.IsKeyDown(Keys.S))
+        if (input.IsKeyDown(Keys.S))
         {
-            direction -= _front; //Backwards
+            direction -= _front;
         }
-        if (keyboard.IsKeyDown(Keys.A))
+        if (input.IsKeyDown(Keys.A))
         {
-            direction -= _right; //Left
+            direction -= _right;
         }
-        if (keyboard.IsKeyDown(Keys.D))
+        if (input.IsKeyDown(Keys.D))
         {
-            direction += _right; //Right
+            direction += _right;
         }
-        if (keyboard.IsKeyDown(Keys.Space))
+        if (input.IsKeyDown(Keys.Space))
         {
-            direction += _up; //Up 
+            direction += _up;
         }
-        if (keyboard.IsKeyDown(Keys.LeftShift))
+        if (input.IsKeyDown(Keys.LeftShift))
         {
-            direction -= _up; //Down
+            direction -= _up;
         }
 
-        direction *= _moveSpeed * frameTime;
+        direction *= _moveSpeed * Time.Instance.UpdateTime;
 
         Move(direction);
     }
 
-    public void Rotate(MouseState mouse)
+    public void Rotate()
     {
+        var currentPosition = Input.Instance.MousePosition;
+
+        if (currentPosition == _lastPosition)
+        {
+            return;
+        }
+
         if (_firstRotate)
         {
-            _lastPosition = new Vector2(mouse.X, mouse.Y);
+            _lastPosition = new Vector2(currentPosition.X, currentPosition.Y);
             _firstRotate = false;
         }
         else
         {
-            float deltaX = mouse.X - _lastPosition.X;
-            float deltaY = mouse.Y - _lastPosition.Y;
+            float deltaX = currentPosition.X - _lastPosition.X;
+            float deltaY = currentPosition.Y - _lastPosition.Y;
 
-            _lastPosition = new Vector2(mouse.X, mouse.Y);
+            _lastPosition = new Vector2(currentPosition.X, currentPosition.Y);
 
             _yaw += deltaX * _sensivity;
             _pitch -= deltaY * _sensivity;

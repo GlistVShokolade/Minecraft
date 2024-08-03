@@ -2,8 +2,8 @@
 
 public abstract class GameObject
 {
-    public Transform Transform { get; private set; }
-    public Renderer Renderer { get; private set; }
+    public Transform Transform { get; }
+    public Renderer Renderer { get; }
 
     public GameObject(Transform transform, Renderer renderer)
     {

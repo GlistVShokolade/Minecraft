@@ -47,7 +47,6 @@
 // VERSION: 1.1.1
 // https://github.com/Auburn/FastNoiseLite
 
-using System;
 using System.Runtime.CompilerServices;
 
 // Switch between using floats or doubles for input position
@@ -59,7 +58,7 @@ public class FastNoiseLite
     private const short INLINE = 256; // MethodImplOptions.AggressiveInlining;
     private const short OPTIMISE = 512; // MethodImplOptions.AggressiveOptimization;
 
-    public enum NoiseType 
+    public enum NoiseType : byte
     { 
         OpenSimplex2,
         OpenSimplex2S,
@@ -69,14 +68,14 @@ public class FastNoiseLite
         Value 
     };
 
-    public enum RotationType3D 
+    public enum RotationType3D : byte
     {
         None, 
         ImproveXYPlanes, 
         ImproveXZPlanes 
     };
     
-    public enum FractalType 
+    public enum FractalType : byte
     {
         None, 
         FBm, 
@@ -86,7 +85,7 @@ public class FastNoiseLite
         DomainWarpIndependent 
     };
 
-    public enum CellularDistanceFunction 
+    public enum CellularDistanceFunction : byte
     {
         Euclidean, 
         EuclideanSq, 
@@ -94,7 +93,7 @@ public class FastNoiseLite
         Hybrid 
     };
     
-    public enum CellularReturnType 
+    public enum CellularReturnType : byte
     {
         CellValue, 
         Distance, 
@@ -105,14 +104,14 @@ public class FastNoiseLite
         Distance2Div 
     };
 
-    public enum DomainWarpType 
+    public enum DomainWarpType : byte
     { 
         OpenSimplex2, 
         OpenSimplex2Reduced, 
         BasicGrid 
     };
 
-    private enum TransformType3D 
+    private enum TransformType3D : byte
     {
         None, 
         ImproveXYPlanes, 
@@ -133,7 +132,7 @@ public class FastNoiseLite
     private float mWeightedStrength = 0.0f;
     private float mPingPongStrength = 2.0f;
 
-    private float mFractalBounding = 1 / 1.75f;
+    private float mFractalBounding = 1f / 1.75f;
 
     private CellularDistanceFunction mCellularDistanceFunction = CellularDistanceFunction.EuclideanSq;
     private CellularReturnType mCellularReturnType = CellularReturnType.Distance;
@@ -146,7 +145,7 @@ public class FastNoiseLite
     /// <summary>
     /// Create new FastNoise object with optional seed
     /// </summary>
-    public FastNoiseLite(int seed = 1337)
+    public FastNoiseLite(int seed = 228)
     {
         SetSeed(seed);
     }
@@ -472,7 +471,7 @@ public class FastNoiseLite
         0.01426758847f, -0.9998982128f, -0.6734383991f, 0.7392433447f, 0.639412098f, -0.7688642071f, 0.9211571421f, 0.3891908523f, -0.146637214f, -0.9891903394f, -0.782318098f, 0.6228791163f, -0.5039610839f, -0.8637263605f, -0.7743120191f, -0.6328039957f,
     };
 
-    private static readonly float[] Gradients3D =
+    private static readonly sbyte[] Gradients3D =
     {
         0, 1, 1, 0,  0,-1, 1, 0,  0, 1,-1, 0,  0,-1,-1, 0,
         1, 0, 1, 0, -1, 0, 1, 0,  1, 0,-1, 0, -1, 0,-1, 0,

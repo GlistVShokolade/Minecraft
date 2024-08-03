@@ -1,4 +1,5 @@
-﻿using OpenTK.Mathematics;
+﻿using OpenTK.Graphics.OpenGL;
+using OpenTK.Mathematics;
 
 public class Transform
 {
@@ -10,13 +11,44 @@ public class Transform
 
     public Transform(Vector3 position, Vector3 scale, Quaternion rotation)
     {
+        TransformChanged += LoadModelMatrix;
+
         SetPosition(position);
         SetRotation(rotation);
         SetScale(scale);
     }
 
+    ~Transform()
+    {
+        TransformChanged -= LoadModelMatrix;
+    }
+
+    private void LoadModelMatrix()
+    {
+        GL.MatrixMode(MatrixMode.Modelview);
+        GL.LoadIdentity();
+
+        var angleX = MathHelper.DegreesToRadians(Rotation.X);
+        var angleY = MathHelper.DegreesToRadians(Rotation.Y);
+        var angleZ = MathHelper.DegreesToRadians(Rotation.Z);
+
+        var modelMatrix =
+            Matrix4.CreateTranslation(Position) *
+            Matrix4.CreateRotationX(angleX) *
+            Matrix4.CreateRotationY(angleY) *
+            Matrix4.CreateRotationZ(angleZ) *
+            Matrix4.CreateScale(Scale);
+
+        GL.LoadMatrix(ref modelMatrix);
+    }
+
     public void SetRotation(Quaternion rotation)
     {
+        if (Rotation == rotation)
+        {
+            return;
+        }
+
         Rotation = rotation;
 
         TransformChanged?.Invoke();
