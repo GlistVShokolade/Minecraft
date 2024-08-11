@@ -5,13 +5,14 @@ public class Transform
 {
     public Vector3 Position { get; private set; }
     public Vector3 Scale { get; private set; }
-    public Quaternion Rotation { get; private set; }
+    public Vector3 Rotation { get; private set; }
 
     public event Action TransformChanged;
 
-    public Transform(Vector3 position, Vector3 scale, Quaternion rotation)
+    public Transform(Vector3 position, Vector3 scale, Vector3 rotation)
     {
         TransformChanged += LoadModelMatrix;
+        TransformChanged += UpdateView;
 
         SetPosition(position);
         SetRotation(rotation);
@@ -21,6 +22,18 @@ public class Transform
     ~Transform()
     {
         TransformChanged -= LoadModelMatrix;
+        TransformChanged -= UpdateView;
+    }
+
+    private void UpdateView()
+    {
+        GL.PushMatrix();
+
+        GL.Translate(Position);
+        GL.Scale(Scale);
+        GL.Rotate(1f, Rotation);
+
+        GL.PopMatrix();
     }
 
     private void LoadModelMatrix()
@@ -42,7 +55,7 @@ public class Transform
         GL.LoadMatrix(ref modelMatrix);
     }
 
-    public void SetRotation(Quaternion rotation)
+    public void SetRotation(Vector3 rotation)
     {
         if (Rotation == rotation)
         {

@@ -27,7 +27,7 @@ public class Camera : Transform
     private readonly float _sensivity;
     private readonly float _moveSpeed;
 
-    public Camera(float moveSpeed, float sensivity, Vector3 position, Vector3 scale, Quaternion rotation) : base(position, scale, rotation)
+    public Camera(float moveSpeed, float sensivity, Vector3 position, Vector3 scale, Vector3 rotation) : base(position, scale, rotation)
     {
         _moveSpeed = moveSpeed >= 0f ? moveSpeed : throw new ArgumentOutOfRangeException(nameof(moveSpeed));
         _sensivity = sensivity >= 0f ? sensivity : throw new ArgumentOutOfRangeException(nameof(sensivity));
@@ -55,31 +55,29 @@ public class Camera : Transform
 
     public void Move()
     {
-        var input = Input.Instance;
-
         Vector3 direction = Vector3.Zero;
 
-        if (input.IsKeyDown(Keys.W))
+        if (Input.IsKeyDown(Keys.W))
         {
             direction += _front;
         }
-        if (input.IsKeyDown(Keys.S))
+        if (Input.IsKeyDown(Keys.S))
         {
             direction -= _front;
         }
-        if (input.IsKeyDown(Keys.A))
+        if (Input.IsKeyDown(Keys.A))
         {
             direction -= _right;
         }
-        if (input.IsKeyDown(Keys.D))
+        if (Input.IsKeyDown(Keys.D))
         {
             direction += _right;
         }
-        if (input.IsKeyDown(Keys.Space))
+        if (Input.IsKeyDown(Keys.Space))
         {
             direction += _up;
         }
-        if (input.IsKeyDown(Keys.LeftShift))
+        if (Input.IsKeyDown(Keys.LeftShift))
         {
             direction -= _up;
         }
@@ -91,7 +89,7 @@ public class Camera : Transform
 
     public void Rotate()
     {
-        var currentPosition = Input.Instance.MousePosition;
+        var currentPosition = Input.MousePosition;
 
         if (currentPosition == _lastPosition)
         {

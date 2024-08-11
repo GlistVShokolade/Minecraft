@@ -69,6 +69,16 @@ public class Block
             new Vector3(1f, 1f, 1f),
             new Vector3(1f, 0f, 0f),
             new Vector3(1f, 1f, 0f),
+        }; 
+        
+        _normals = new Vector3[]
+        {
+            Vector3.UnitZ,
+            -Vector3.UnitZ,
+            Vector3.UnitY,
+            -Vector3.UnitY,
+            Vector3.UnitX,
+            -Vector3.UnitX,
         };
     }
 }

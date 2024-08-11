@@ -14,6 +14,6 @@ public abstract class GameObject
     public GameObject(Renderer renderer)
     {
         Renderer = renderer;
-        Transform = new Transform(Vector3.Zero, Vector3.One, Quaternion.Identity);
+        Transform = new Transform(Vector3.Zero, Vector3.One, Vector3.Zero);
     }
 }
